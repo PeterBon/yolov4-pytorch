@@ -83,7 +83,7 @@ if __name__ == '__main__':
     SIZE = 416
     anchors_num = 9
     # 载入数据集，可以使用VOC的xml
-    path = r'./VOCdevkit/VOC2007/Annotations'
+    path = r'./VOCdevkit/VOC2007/Annotations/'
     
     # 载入所有的xml
     # 存储格式为转化为比例后的width,height
