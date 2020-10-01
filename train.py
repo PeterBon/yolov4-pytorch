@@ -74,7 +74,7 @@ def fit_one_epoch(net, yolo_losses, epoch, epoch_size, epoch_size_val, gen, genv
 
             pbar.set_postfix(**{'total_loss': total_loss.item() / (iteration + 1),
                                 'lr': get_lr(optimizer),
-                                'step/s': waste_time})
+                                's/step': waste_time})
             pbar.update(1)
 
             start_time = time.time()
