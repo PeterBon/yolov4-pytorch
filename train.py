@@ -11,7 +11,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
-from utils.dataloader import yolo_dataset_collate, YoloDataset
+from utils.dataset import yolo_dataset_collate, YoloDataset
 from nets.yolo_training import YOLOLoss, Generator
 from nets.yolo4 import YoloBody
 from tqdm import tqdm
@@ -110,7 +110,7 @@ def fit_one_epoch(net, yolo_losses, epoch, epoch_size, epoch_size_val, gen, genv
 
     print('Saving state, iter:', str(epoch + 1))
     torch.save(model.state_dict(), 'logs/Epoch%d-Total_Loss%.4f-Val_Loss%.4f.pth' % (
-    (epoch + 1), total_loss / (epoch_size + 1), val_loss / (epoch_size_val + 1)))
+        (epoch + 1), total_loss / (epoch_size + 1), val_loss / (epoch_size_val + 1)))
 
 
 # ----------------------------------------------------#
@@ -118,41 +118,20 @@ def fit_one_epoch(net, yolo_losses, epoch, epoch_size, epoch_size_val, gen, genv
 #   https://www.bilibili.com/video/BV1zE411u7Vw
 # ----------------------------------------------------#
 if __name__ == "__main__":
-    with open('model_data/hyp.finetune.yaml') as f:
+    with open('model_data/hyp.finetune.yaml', encoding='utf-8') as f:
         hyp = yaml.load(f, Loader=yaml.FullLoader)
 
     #   输入的shape大小
     input_shape = hyp.get('input_shape')
-    # -------------------------------#
-    #   tricks的使用设置
-    # -------------------------------#
-    Cosine_lr = hyp.get('Cosine_lr')
-    mosaic = hyp.get('mosaic')
-    # 用于设定是否使用cuda
-    Cuda = hyp.get('Cuda')
-    smoooth_label = hyp.get('smoooth_label')
-    # -------------------------------#
-    #   Dataloder的使用
-    # -------------------------------#
-    Use_Data_Loader = hyp.get('Use_Data_Loader')
 
-    annotation_path = hyp.get('annotation_path')
-    # -------------------------------#
-    #   获得先验框和类
-    # -------------------------------#
-    anchors_path = hyp.get('anchors_path')
-
-    classes_path = hyp.get('classes_path')
-    class_names = get_classes(classes_path)
-    anchors = get_anchors(anchors_path)
+    class_names = get_classes(hyp.get('classes_path'))
+    anchors = get_anchors(hyp.get('anchors_path'))
     num_classes = len(class_names)
 
     # 创建模型
     model = YoloBody(len(anchors[0]), num_classes)
-    # -------------------------------------------#
-    #   权值文件的下载请看README
-    # -------------------------------------------#
-    model_path = "model_data/yolo4_weights.pth"
+
+    model_path = hyp.get('model_path')
     # 加快模型训练的效率
     print('Loading weights into state dict...')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -165,6 +144,7 @@ if __name__ == "__main__":
 
     net = model.train()
 
+    Cuda = torch.cuda.is_available()
     if Cuda:
         net = torch.nn.DataParallel(model)
         cudnn.benchmark = True
@@ -174,11 +154,11 @@ if __name__ == "__main__":
     yolo_losses = []
     for i in range(3):
         yolo_losses.append(YOLOLoss(np.reshape(anchors, [-1, 2]), num_classes, \
-                                    (input_shape[1], input_shape[0]), smoooth_label, Cuda))
+                                    (input_shape[1], input_shape[0]), hyp.get('smoooth_label'), Cuda))
 
     # 0.1用于验证，0.9用于训练
-    val_split = 0.1
-    with open(annotation_path) as f:
+    val_split = hyp.get('val_split')
+    with open(hyp.get('annotation_path')) as f:
         lines = f.readlines()
     np.random.seed(10101)
     np.random.shuffle(lines)
@@ -186,84 +166,44 @@ if __name__ == "__main__":
     num_val = int(len(lines) * val_split)
     num_train = len(lines) - num_val
 
-    # ------------------------------------------------------#
-    #   主干特征提取网络特征通用，冻结训练可以加快训练速度
-    #   也可以在训练初期防止权值被破坏。
-    #   Init_Epoch为起始世代
-    #   Freeze_Epoch为冻结训练的世代
-    #   Epoch总训练世代
-    #   提示OOM或者显存不足请调小Batch_size
-    # ------------------------------------------------------#
-    if True:
-        lr = 1e-3
-        Batch_size = 4
-        Init_Epoch = 0
-        Freeze_Epoch = 50
+    lr = hyp.get('lr')
+    Batch_size = hyp.get('batch_size')
+    start_epoch = hyp.get('start_epoch')
+    end_epoch = hyp.get('end_epoch')
+    optimizer = optim.Adam(net.parameters(), lr, weight_decay=hyp.get('weight_decay'))
+    if hyp.get('cosine_lr'):
+        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5, eta_min=1e-5,
+                                                            last_epoch=start_epoch - 1)
+    else:
+        lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95, last_epoch=start_epoch - 1)
 
-        optimizer = optim.Adam(net.parameters(), lr, weight_decay=5e-4)
-        if Cosine_lr:
-            lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5, eta_min=1e-5)
-        else:
-            lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95)
+    train_dataset = YoloDataset(lines[:num_train], (input_shape[0], input_shape[1]), hyp=hyp)
+    val_dataset = YoloDataset(lines[num_train:], (input_shape[0], input_shape[1]), hyp=hyp)
+    gen = DataLoader(train_dataset, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                     drop_last=True, collate_fn=yolo_dataset_collate)
+    gen_val = DataLoader(val_dataset, batch_size=Batch_size, num_workers=4, pin_memory=True,
+                         drop_last=True, collate_fn=yolo_dataset_collate)
 
-        if Use_Data_Loader:
-            train_dataset = YoloDataset(lines[:num_train], (input_shape[0], input_shape[1]), mosaic=mosaic)
-            val_dataset = YoloDataset(lines[num_train:], (input_shape[0], input_shape[1]), mosaic=False)
-            gen = DataLoader(train_dataset, batch_size=Batch_size, num_workers=4, pin_memory=True,
-                             drop_last=True, collate_fn=yolo_dataset_collate)
-            gen_val = DataLoader(val_dataset, batch_size=Batch_size, num_workers=4, pin_memory=True,
-                                 drop_last=True, collate_fn=yolo_dataset_collate)
-        else:
-            gen = Generator(Batch_size, lines[:num_train],
-                            (input_shape[0], input_shape[1])).generate(mosaic=mosaic)
-            gen_val = Generator(Batch_size, lines[num_train:],
-                                (input_shape[0], input_shape[1])).generate(mosaic=False)
+    epoch_size = max(1, num_train // Batch_size)
+    epoch_size_val = num_val // Batch_size
 
-        epoch_size = max(1, num_train // Batch_size)
-        epoch_size_val = num_val // Batch_size
+    if hyp.get('freeze'):
         # ------------------------------------#
         #   冻结一定部分训练
         # ------------------------------------#
         for param in model.backbone.parameters():
             param.requires_grad = False
 
-        for epoch in range(Init_Epoch, Freeze_Epoch):
-            fit_one_epoch(net, yolo_losses, epoch, epoch_size, epoch_size_val, gen, gen_val, Freeze_Epoch, Cuda)
+        for epoch in range(start_epoch, end_epoch):
+            fit_one_epoch(net, yolo_losses, epoch, epoch_size, epoch_size_val, gen, gen_val, end_epoch, Cuda)
             lr_scheduler.step()
-
-    if True:
-        lr = 1e-4
-        Batch_size = 2
-        Freeze_Epoch = 50
-        Unfreeze_Epoch = 100
-
-        optimizer = optim.Adam(net.parameters(), lr, weight_decay=5e-4)
-        if Cosine_lr:
-            lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=5, eta_min=1e-5)
-        else:
-            lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.95)
-
-        if Use_Data_Loader:
-            train_dataset = YoloDataset(lines[:num_train], (input_shape[0], input_shape[1]), mosaic=mosaic)
-            val_dataset = YoloDataset(lines[num_train:], (input_shape[0], input_shape[1]), mosaic=False)
-            gen = DataLoader(train_dataset, batch_size=Batch_size, num_workers=4, pin_memory=True,
-                             drop_last=True, collate_fn=yolo_dataset_collate)
-            gen_val = DataLoader(val_dataset, batch_size=Batch_size, num_workers=4, pin_memory=True,
-                                 drop_last=True, collate_fn=yolo_dataset_collate)
-        else:
-            gen = Generator(Batch_size, lines[:num_train],
-                            (input_shape[0], input_shape[1])).generate(mosaic=mosaic)
-            gen_val = Generator(Batch_size, lines[num_train:],
-                                (input_shape[0], input_shape[1])).generate(mosaic=False)
-
-        epoch_size = max(1, num_train // Batch_size)
-        epoch_size_val = num_val // Batch_size
+    else:
         # ------------------------------------#
         #   解冻后训练
         # ------------------------------------#
         for param in model.backbone.parameters():
             param.requires_grad = True
 
-        for epoch in range(Freeze_Epoch, Unfreeze_Epoch):
-            fit_one_epoch(net, yolo_losses, epoch, epoch_size, epoch_size_val, gen, gen_val, Unfreeze_Epoch, Cuda)
+        for epoch in range(start_epoch, end_epoch):
+            fit_one_epoch(net, yolo_losses, epoch, epoch_size, epoch_size_val, gen, gen_val, end_epoch, Cuda)
             lr_scheduler.step()

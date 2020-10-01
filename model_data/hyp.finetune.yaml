@@ -8,21 +8,38 @@
 #                   P         R     mAP.5 mAP.5:.95       box       obj       cls
 # Metrics:        0.6     0.936     0.896     0.684    0.0115   0.00805   0.00146
 
-input_shape: [512,512]
-Cosine_lr: False
-mosaic: True
-Cuda: True
+# 输入
+input_shape: [512,512] # 训练的输入图像大小
+annotation_path: 2007_train.txt # 训练文件路径
+anchors_path: model_data/yolo_anchors.txt # anchor文件路径
+classes_path: model_data/tt100k_classes.txt # classes文件路径
+model_path: model_data/yolo4_weights.pth # 预训练文件路径
+val_split: 0.1 # 用于验证集的比例
+
+# 训练参数
+start_epoch: 0 # 起始世代
+end_epoch: 10 # 结束世代
+freeze: True # 是否冻结训练
+cosine_lr: False # 是否使用cosine学习率
+lr: 0.001 # Adam优化器中的初始学习率
+weight_decay: 0.00036 # Adam优化器中的权重衰减参数
+batch_size: 4 # 批大小
 smoooth_label: 0
-Use_Data_Loader: True
-annotation_path: 2007_train.txt
-anchors_path: model_data/yolo_anchors.txt
-classes_path: model_data/voc_classes.txt
+
+# 图像增强
+mosaic: True # 是否使用mosaic图像增强
+hsv_h: 0.1
+hsv_s: 0.5
+hsv_v: 0.5
+area_thr: 0.6 # 随机裁剪参数，根据裁剪前后box的面积之比，剔除不合格box
+perspective: 0.001 # 透视变换参数 0-0.001
 
 
+
+# 其它
 lr0: 0.0032
 lrf: 0.12
 momentum: 0.843
-weight_decay: 0.00036
 warmup_epochs: 2.0
 warmup_momentum: 0.5
 warmup_bias_lr: 0.05
@@ -35,14 +52,12 @@ iou_t: 0.2
 anchor_t: 2.91
 # anchors: 3.63
 fl_gamma: 0.0
-hsv_h: 0.0138
-hsv_s: 0.664
-hsv_v: 0.464
+
 degrees: 0.373
 translate: 0.245
 scale: 0.898
 shear: 0.602
-perspective: 0.0
+
 flipud: 0.00856
 fliplr: 0.5
 
