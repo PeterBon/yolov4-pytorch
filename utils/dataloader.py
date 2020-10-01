@@ -31,7 +31,7 @@ class YoloDataset(Dataset):
     def rand(self, a=0, b=1):
         return np.random.rand() * (b - a) + a
 
-    def get_random_data(self, annotation_line, input_shape, jitter=.3, hue=.1, sat=.5, val=.5):
+    def get_random_data(self, annotation_line, input_shape, hue=.1, sat=.5, val=.5):
         """实时数据增强的随机预处理"""
         line = annotation_line.split()
         image = cv2.imread(line[0])
